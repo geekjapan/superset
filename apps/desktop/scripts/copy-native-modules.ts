@@ -23,6 +23,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { satisfies } from "semver";
@@ -98,7 +99,7 @@ function copyModuleIfSymlink(
 		console.log(`    Real path: ${realPath}`);
 
 		// Remove the symlink
-		rmSync(modulePath);
+		removeModulePathForReplacement(modulePath);
 
 		// Copy the actual files
 		cpSync(realPath, modulePath, { recursive: true });
@@ -109,6 +110,15 @@ function copyModuleIfSymlink(
 	}
 
 	return true;
+}
+
+export function removeModulePathForReplacement(modulePath: string): void {
+	if (lstatSync(modulePath).isSymbolicLink()) {
+		unlinkSync(modulePath);
+		return;
+	}
+
+	rmSync(modulePath, { recursive: true });
 }
 
 function readInstalledModuleVersion(modulePath: string): string | null {
@@ -492,4 +502,6 @@ function prepareNativeModules() {
 	console.log("\nDone!");
 }
 
-prepareNativeModules();
+if (import.meta.main) {
+	prepareNativeModules();
+}

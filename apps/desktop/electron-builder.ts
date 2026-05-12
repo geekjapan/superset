@@ -87,8 +87,10 @@ const config: Configuration = {
 		"!**/.DS_Store",
 	],
 
-	// Rebuild native modules for Electron's Node.js version
-	npmRebuild: true,
+	// Native modules are materialized by scripts/copy-native-modules.ts before
+	// packaging. Rebuilding here requires a local node-gyp/Python toolchain and
+	// breaks Windows source builds that can use prepared binaries.
+	npmRebuild: false,
 
 	// macOS DMG installer
 	dmg: {
@@ -145,7 +147,7 @@ const config: Configuration = {
 		...(existsSync(winIconPath) ? { icon: winIconPath } : {}),
 		target: [
 			{
-				target: "nsis",
+				target: "portable",
 				arch: ["x64"],
 			},
 		],

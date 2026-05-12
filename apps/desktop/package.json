@@ -21,11 +21,12 @@
 		"dev": "cross-env NODE_ENV=development NODE_OPTIONS=--max-old-space-size=8192 electron-vite dev --watch",
 		"compile:app": "cross-env NODE_OPTIONS=--max-old-space-size=8192 electron-vite build && bun run scripts/check-pty-daemon-bundle.ts",
 		"check:pty-daemon-bundle": "bun run scripts/check-pty-daemon-bundle.ts",
+		"prepare:electron-native-modules": "bun run scripts/prepare-electron-native-modules.ts",
 		"copy:native-modules": "bun run scripts/copy-native-modules.ts",
 		"validate:native-runtime": "bun run scripts/validate-native-runtime.ts",
-		"prebuild": "bun run clean:dev && bun run generate:icons && bun run compile:app && bun run copy:native-modules && bun run validate:native-runtime",
+		"prebuild": "bun run clean:dev && bun run generate:icons && bun run compile:app && bun run prepare:electron-native-modules && bun run copy:native-modules && bun run validate:native-runtime",
 		"build": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --publish never",
-		"prepackage": "bun run copy:native-modules && bun run validate:native-runtime",
+		"prepackage": "bun run prepare:electron-native-modules && bun run copy:native-modules && bun run validate:native-runtime",
 		"package": "electron-builder --config electron-builder.ts",
 		"install:deps": "electron-builder install-app-deps",
 		"release": "electron-builder --publish always",
@@ -89,7 +90,6 @@
 		"@superset/desktop-mcp": "workspace:*",
 		"@superset/host-service": "workspace:*",
 		"@superset/local-db": "workspace:*",
-		"@superset/macos-process-metrics": "workspace:*",
 		"@superset/panes": "workspace:*",
 		"@superset/port-scanner": "workspace:*",
 		"@superset/pty-daemon": "workspace:*",
@@ -241,6 +241,9 @@
 		"uuid": "^14.0.0",
 		"zod": "^4.3.5",
 		"zustand": "^5.0.8"
+	},
+	"optionalDependencies": {
+		"@superset/macos-process-metrics": "workspace:*"
 	},
 	"devDependencies": {
 		"@sentry/vite-plugin": "^4.7.0",

@@ -8,6 +8,7 @@ type ExternalizedRuntimeModule = {
 	asarUnpackGlobs: string[];
 	materialize: string[];
 	packagedCopies: PackagedNodeModuleCopy[];
+	platforms?: NodeJS.Platform[];
 	specifier: string;
 };
 
@@ -51,6 +52,7 @@ const externalizedRuntimeModules: ExternalizedRuntimeModule[] = [
 	},
 	{
 		specifier: "@superset/macos-process-metrics",
+		platforms: ["darwin"],
 		materialize: ["@superset/macos-process-metrics"],
 		packagedCopies: [copyWholeModule("@superset/macos-process-metrics")],
 		asarUnpackGlobs: ["**/node_modules/@superset/macos-process-metrics/**/*"],
@@ -81,6 +83,17 @@ const externalizedRuntimeModules: ExternalizedRuntimeModule[] = [
 	},
 ];
 
+const targetPlatform = (process.env.TARGET_PLATFORM ||
+	process.platform) as NodeJS.Platform;
+
+function supportsTargetPlatform(module: ExternalizedRuntimeModule): boolean {
+	return !module.platforms || module.platforms.includes(targetPlatform);
+}
+
+const packagedRuntimeModules = externalizedRuntimeModules.filter(
+	supportsTargetPlatform,
+);
+
 const packagedSupportModules = [
 	copyWholeModule("bindings"),
 	copyWholeModule("file-uri-to-path"),
@@ -102,18 +115,18 @@ export const mainExternalizedDependencies = [
 ];
 
 export const packagedNodeModuleCopies = [
-	...externalizedRuntimeModules.flatMap((module) => module.packagedCopies),
+	...packagedRuntimeModules.flatMap((module) => module.packagedCopies),
 	...packagedSupportModules,
 ];
 
 export const packagedAsarUnpackGlobs = [
-	...externalizedRuntimeModules.flatMap((module) => module.asarUnpackGlobs),
+	...packagedRuntimeModules.flatMap((module) => module.asarUnpackGlobs),
 	"**/node_modules/bindings/**/*",
 	"**/node_modules/file-uri-to-path/**/*",
 ];
 
 export const requiredMaterializedNodeModules = [
-	...externalizedRuntimeModules.flatMap((module) => module.materialize),
+	...packagedRuntimeModules.flatMap((module) => module.materialize),
 	"bindings",
 	"file-uri-to-path",
 	"detect-libc",
