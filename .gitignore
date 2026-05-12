@@ -36,6 +36,7 @@ yarn.lock
 # Env variables
 .env
 .env.*
+!.env.example
 !.bun-version
 
 mise.toml
@@ -81,11 +82,13 @@ apps/streams/data/
 Caddyfile
 superset-dev-data/
 
-# Codex workspace config (track only shared config/symlinks; ignore runtime state)
-.codex/*
-!.codex/config.toml
-!.codex/commands
-!.codex/prompts
+# Local AI/agent tool config and runtime state
+/.agents/
+/.claude/
+/.claude-plugin/
+/.codex/
+/.cursor/
+/.mastracode/
 .amp/*
 
 # MCP config (contains per-user server URLs/tokens)
