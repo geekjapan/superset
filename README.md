@@ -268,3 +268,9 @@ Join the Superset community to get help, share feedback, and connect with other 
 ## License
 
 Distributed under the Elastic License 2.0 (ELv2). See [LICENSE.md](LICENSE.md) for more information.
+
+### Fork Notice
+
+This fork is maintained for personal use to build and adjust the Windows desktop application. It preserves the original Elastic License 2.0 terms, copyright notices, and license references from Superset, Inc.
+
+Modified builds should clearly state that they are modified versions of Superset. The Superset name, logos, and other marks remain subject to the original owner's trademark rights, and this fork is not intended to provide Superset as a hosted or managed service to third parties.
