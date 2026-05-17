@@ -298,13 +298,13 @@ jobs:
         run: bun install --frozen --ignore-scripts
 
       - name: Patch native-keymap binding.gyp for MSVC
-        working-directory: apps/desktop
         shell: pwsh
         run: |
           # native-keymap@3.3.9 uses a deprecated V8 API in Electron 40 headers,
           # generating C4996 which electron-gyp treats as an error. Patch binding.gyp
           # directly to add /wd4996 so it is part of the project file, not an env var.
-          $files = Get-ChildItem -Path "node_modules" -Recurse -Filter "binding.gyp" -ErrorAction SilentlyContinue |
+          # Bun stores packages under the repo-root node_modules/.bun/, not the app dir.
+          $files = Get-ChildItem -Path "$env:GITHUB_WORKSPACE\node_modules" -Recurse -Filter "binding.gyp" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match "native-keymap" }
           if ($files.Count -eq 0) {
             Write-Warning "native-keymap binding.gyp not found — skipping patch"
