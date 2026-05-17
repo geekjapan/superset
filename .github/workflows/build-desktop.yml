@@ -276,10 +276,6 @@ jobs:
       - name: Enable Git long paths
         run: git config --system core.longpaths true
 
-      - name: Suppress MSVC C4996 for native-keymap
-        shell: pwsh
-        run: echo "CL=/wd4996" >> $env:GITHUB_ENV
-
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -300,6 +296,27 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen --ignore-scripts
+
+      - name: Patch native-keymap binding.gyp for MSVC
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          # native-keymap@3.3.9 uses a deprecated V8 API in Electron 40 headers,
+          # generating C4996 which electron-gyp treats as an error. Patch binding.gyp
+          # directly to add /wd4996 so it is part of the project file, not an env var.
+          $files = Get-ChildItem -Path "node_modules" -Recurse -Filter "binding.gyp" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "native-keymap" }
+          if ($files.Count -eq 0) {
+            Write-Warning "native-keymap binding.gyp not found — skipping patch"
+          }
+          foreach ($file in $files) {
+            $content = Get-Content $file.FullName -Raw
+            if ($content -notmatch '/wd4996') {
+              $content = $content -replace "'/ZH:SHA_256'", "'/ZH:SHA_256', '/wd4996'"
+              Set-Content $file.FullName $content -NoNewline
+              Write-Host "Patched: $($file.FullName)"
+            }
+          }
 
       - name: Install desktop native dependencies
         working-directory: apps/desktop
