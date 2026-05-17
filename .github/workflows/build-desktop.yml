@@ -276,6 +276,10 @@ jobs:
       - name: Enable Git long paths
         run: git config --system core.longpaths true
 
+      - name: Suppress MSVC C4996 for native-keymap
+        shell: pwsh
+        run: echo "CL=/wd4996" >> $env:GITHUB_ENV
+
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -299,9 +303,6 @@ jobs:
 
       - name: Install desktop native dependencies
         working-directory: apps/desktop
-        env:
-          # Suppress MSVC C4996 (deprecated V8 API warnings in native-keymap@3.3.9)
-          CL: /wd4996
         run: bun run install:deps
 
       - name: Set version suffix
