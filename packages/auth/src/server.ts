@@ -259,6 +259,21 @@ export const auth = betterAuth({
 				enabled: true,
 				maximumTeams: 25,
 				allowRemovingAllTeams: false,
+				defaultTeam: {
+					enabled: true,
+					customCreateDefaultTeam: async (organization) => {
+						const [team] = await db
+							.insert(authSchema.teams)
+							.values({
+								name: "Default Team",
+								slug: "DEFAULT",
+								organizationId: organization.id,
+							})
+							.returning();
+						if (!team) throw new Error("Failed to create default team");
+						return { ...team, updatedAt: team.updatedAt ?? undefined };
+					},
+				},
 			},
 			schema: {
 				team: {
@@ -295,7 +310,7 @@ export const auth = betterAuth({
 			},
 			organizationHooks: {
 				beforeCreateInvitation: async (data) => {
-					const { inviterId, organizationId, role } = data.invitation;
+					const { inviterId, organizationId, role, teamId } = data.invitation;
 
 					const { success } = await invitationRateLimit.limit(inviterId);
 					if (!success) {
@@ -323,6 +338,19 @@ export const auth = betterAuth({
 					) {
 						throw new Error("Cannot invite users with this role");
 					}
+
+					if (!teamId) {
+						const oldestTeam = await db.query.teams.findFirst({
+							where: eq(authSchema.teams.organizationId, organizationId),
+							orderBy: asc(authSchema.teams.createdAt),
+							columns: { id: true },
+						});
+						if (oldestTeam) {
+							return {
+								data: { ...data.invitation, teamId: oldestTeam.id },
+							};
+						}
+					}
 				},
 
 				afterCreateOrganization: async ({ organization, user }) => {
@@ -341,12 +369,6 @@ export const auth = betterAuth({
 						.where(eq(authSchema.organizations.id, organization.id));
 
 					await seedDefaultStatuses(organization.id);
-
-					await db.insert(authSchema.teams).values({
-						name: organization.name,
-						slug: organization.slug,
-						organizationId: organization.id,
-					});
 				},
 
 				beforeRemoveMember: async ({ member, organization }) => {
@@ -805,7 +827,11 @@ export const auth = betterAuth({
 					}
 				},
 
-				getCheckoutSessionParams: async ({ user, plan, subscription }) => {
+				getCheckoutSessionParams: async (
+					{ user, plan, subscription },
+					_request,
+					ctx,
+				) => {
 					if (plan.name === "enterprise") {
 						throw new Error(
 							"Enterprise subscriptions are managed by admins. Contact founders@superset.sh.",
@@ -819,10 +845,14 @@ export const auth = betterAuth({
 						),
 					});
 
+					const annual = Boolean(
+						(ctx?.body as { annual?: boolean } | undefined)?.annual,
+					);
+
 					return {
 						params: {
 							customer: org?.stripeCustomerId ?? undefined,
-							allow_promotion_codes: true,
+							allow_promotion_codes: !annual,
 							billing_address_collection: "required",
 							metadata: {
 								organizationId: org?.id ?? "",

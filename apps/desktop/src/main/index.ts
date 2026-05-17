@@ -27,6 +27,7 @@ import { setupAgentHooks } from "./lib/agent-setup";
 import { initAppState } from "./lib/app-state";
 import { requestAppleEventsAccess } from "./lib/apple-events-permission";
 import { setupAutoUpdater } from "./lib/auto-updater";
+import { installBundledCliShim } from "./lib/bundled-cli";
 import { resolveDevWorkspaceName } from "./lib/dev-workspace-name";
 import { setWorkspaceDockIcon } from "./lib/dock-icon";
 import { loadWebviewBrowserExtension } from "./lib/extensions";
@@ -48,6 +49,7 @@ import {
 	getTerminalHostClient,
 } from "./lib/terminal-host/client";
 import { disposeTray, initTray } from "./lib/tray";
+import { startNetworkLogger, stopNetworkLogger } from "./network-logger";
 import { MainWindow } from "./windows/main";
 
 console.log("[main] Local database ready:", !!localDb);
@@ -232,6 +234,8 @@ app.on("before-quit", async (event) => {
 		disposeTray();
 	} catch (error) {
 		console.error("[main] Cleanup during quit failed:", error);
+	} finally {
+		await stopNetworkLogger();
 	}
 	app.exit(0);
 });
@@ -268,7 +272,9 @@ if (process.env.NODE_ENV === "development") {
 		if (signalHandled) return;
 		signalHandled = true;
 		console.log(`[main] Received ${signal}, quitting...`);
-		void runDevQuitCleanup().finally(() => app.exit(0));
+		void Promise.allSettled([runDevQuitCleanup(), stopNetworkLogger()]).finally(
+			() => app.exit(0),
+		);
 	};
 
 	process.on("SIGTERM", () => handleTerminationSignal("SIGTERM"));
@@ -387,6 +393,12 @@ if (!gotTheLock) {
 		await initAppState();
 		initTanstackDbPersistence();
 
+		try {
+			await startNetworkLogger();
+		} catch (error) {
+			console.error("[main] Failed to start network logger:", error);
+		}
+
 		await loadWebviewBrowserExtension();
 
 		// Must happen before renderer restore runs
@@ -397,6 +409,11 @@ if (!gotTheLock) {
 			setupAgentHooks();
 		} catch (error) {
 			console.error("[main] Failed to set up agent hooks:", error);
+		}
+		try {
+			installBundledCliShim();
+		} catch (error) {
+			console.error("[main] Failed to install bundled CLI shim:", error);
 		}
 
 		// Discover and adopt host-services that survived a previous quit
