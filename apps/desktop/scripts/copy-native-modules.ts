@@ -22,6 +22,7 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	rmdirSync,
 	rmSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -97,8 +98,13 @@ function copyModuleIfSymlink(
 		console.log(`  ${moduleName}: symlink -> replacing with real files`);
 		console.log(`    Real path: ${realPath}`);
 
-		// Remove the symlink
-		rmSync(modulePath);
+		// Remove the symlink/junction.
+		// On Windows, Bun creates directory junctions; rmSync fails on them — use rmdirSync instead.
+		if (process.platform === "win32") {
+			rmdirSync(modulePath);
+		} else {
+			rmSync(modulePath);
+		}
 
 		// Copy the actual files
 		cpSync(realPath, modulePath, { recursive: true });
@@ -470,48 +476,53 @@ function copyParcelWatcherPlatformPackages(nodeModulesDir: string): void {
 	}
 }
 
-function copyDuckdbPlatformPackages(nodeModulesDir: string): void {
-	const nodeBindingsPath = join(nodeModulesDir, "@duckdb", "node-bindings");
-	const nodeBindingsPkgJsonPath = join(nodeBindingsPath, "package.json");
-	if (!existsSync(nodeBindingsPkgJsonPath)) return;
+function copyDuckdbPlatformPackage(nodeModulesDir: string): void {
+	const bindingsPath = join(nodeModulesDir, "@duckdb", "node-bindings");
+	const bindingsPkgJsonPath = join(bindingsPath, "package.json");
+	if (!existsSync(bindingsPkgJsonPath)) return;
 
 	type DuckdbBindingsPackageJson = {
 		optionalDependencies?: Record<string, string>;
 	};
-	const nodeBindingsPkg = JSON.parse(
-		readFileSync(nodeBindingsPkgJsonPath, "utf8"),
+	const bindingsPkg = JSON.parse(
+		readFileSync(bindingsPkgJsonPath, "utf8"),
 	) as DuckdbBindingsPackageJson;
-	const optionalDeps = nodeBindingsPkg.optionalDependencies ?? {};
+	const optionalDeps = bindingsPkg.optionalDependencies ?? {};
+	const targetPackageName = `@duckdb/node-bindings-${TARGET_PLATFORM}-${TARGET_ARCH}`;
+	const targetPackageVersion = optionalDeps[targetPackageName];
+	if (!targetPackageVersion) return;
 
 	console.log("\nPreparing duckdb platform package...");
-
-	// The native binding is a `cpu`/`os`-gated optional dependency, so Bun only
-	// installs the host's. For the target arch, fetch it from npm when missing.
-	const targetSuffix = `${TARGET_PLATFORM}-${TARGET_ARCH}`;
-	const targetEntry = Object.entries(optionalDeps).find(([name]) =>
-		name.endsWith(targetSuffix),
-	);
-	if (!targetEntry) {
-		console.error(
-			`  [ERROR] No @duckdb/node-bindings optional dependency matched ${targetSuffix}`,
-		);
-		process.exit(1);
-	}
-
-	const [targetName, targetVersion] = targetEntry;
-	const destPath = join(nodeModulesDir, targetName);
+	const destPath = join(nodeModulesDir, targetPackageName);
 	if (existsSync(destPath)) {
-		copyModuleIfSymlink(nodeModulesDir, targetName, true);
+		copyModuleIfSymlink(nodeModulesDir, targetPackageName, false);
 		return;
 	}
 
-	copyExactModuleVersion(
-		nodeModulesDir,
-		targetName,
-		targetVersion,
-		destPath,
-		true,
+	const bunStoreFolderName = findBunStoreFolderName(
+		getBunStoreDir(nodeModulesDir),
+		targetPackageName,
+		targetPackageVersion,
 	);
+	if (bunStoreFolderName) {
+		const sourcePath = join(
+			getBunStoreDir(nodeModulesDir),
+			bunStoreFolderName,
+			"node_modules",
+			targetPackageName,
+		);
+		if (existsSync(sourcePath)) {
+			console.log(`  ${targetPackageName}: copying from Bun store`);
+			mkdirSync(dirname(destPath), { recursive: true });
+			cpSync(sourcePath, destPath, { recursive: true });
+			return;
+		}
+	}
+
+	if (!fetchNpmPackage(targetPackageName, targetPackageVersion, destPath)) {
+		console.error(`  [ERROR] ${targetPackageName} was not materialized`);
+		process.exit(1);
+	}
 }
 
 function prepareNativeModules() {
@@ -532,7 +543,7 @@ function prepareNativeModules() {
 	copyAstGrepPlatformPackages(nodeModulesDir);
 	copyParcelWatcherPlatformPackages(nodeModulesDir);
 	copyLibsqlDependencies(nodeModulesDir);
-	copyDuckdbPlatformPackages(nodeModulesDir);
+	copyDuckdbPlatformPackage(nodeModulesDir);
 
 	console.log("\nDone!");
 }
