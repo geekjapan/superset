@@ -1,0 +1,195 @@
+name: Sync Upstream Desktop Release
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Optional upstream desktop tag to sync, e.g. desktop-v1.11.4"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: sync-upstream-desktop-release
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream release tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.sync.outputs.should_release }}
+      release_tag: ${{ steps.sync.outputs.release_tag }}
+      release_sha: ${{ steps.sync.outputs.release_sha }}
+      upstream_release_url: ${{ steps.sync.outputs.upstream_release_url }}
+
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Resolve, merge, and push upstream release
+        id: sync
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUESTED_TAG: ${{ inputs.upstream_tag }}
+          UPSTREAM_REPO: superset-sh/superset
+        run: |
+          set -euo pipefail
+
+          if [ -n "${REQUESTED_TAG}" ]; then
+            case "${REQUESTED_TAG}" in
+              desktop-v[0-9]*.[0-9]*.[0-9]*) ;;
+              *)
+                echo "::error::upstream_tag must look like desktop-vX.Y.Z"
+                exit 1
+                ;;
+            esac
+
+            IS_PUBLISHABLE=$(gh api "repos/${UPSTREAM_REPO}/releases/tags/${REQUESTED_TAG}" \
+              --jq '.draft == false and .prerelease == false')
+            if [ "${IS_PUBLISHABLE}" != "true" ]; then
+              echo "::error::Requested upstream release must not be draft or prerelease"
+              exit 1
+            fi
+            RELEASE_TAG="${REQUESTED_TAG}"
+          else
+            RELEASE_TAG=$(gh api "repos/${UPSTREAM_REPO}/releases?per_page=100" \
+              --jq 'map(select(.draft == false and .prerelease == false and (.tag_name | test("^desktop-v[0-9]+\\.[0-9]+\\.[0-9]+$")))) | first | .tag_name // ""')
+          fi
+
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "No upstream desktop release found."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          UPSTREAM_RELEASE_URL=$(gh api "repos/${UPSTREAM_REPO}/releases/tags/${RELEASE_TAG}" --jq '.html_url')
+          LEGACY_TAG="${RELEASE_TAG#desktop-}"
+
+          echo "Resolved upstream release: ${RELEASE_TAG}"
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists in this fork."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [ "${LEGACY_TAG}" != "${RELEASE_TAG}" ] && gh release view "${LEGACY_TAG}" >/dev/null 2>&1; then
+            echo "Legacy release ${LEGACY_TAG} already exists in this fork; skipping duplicate publish."
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${RELEASE_TAG} already exists without a matching release."
+            exit 1
+          fi
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch origin main --tags
+          git checkout main
+          git reset --hard origin/main
+          git fetch upstream "refs/tags/${RELEASE_TAG}"
+
+          UPSTREAM_COMMIT=$(git rev-parse FETCH_HEAD^{commit})
+          echo "Merging upstream ${RELEASE_TAG} (${UPSTREAM_COMMIT}) into fork main."
+          git merge --no-edit "${UPSTREAM_COMMIT}"
+
+          RELEASE_SHA=$(git rev-parse HEAD)
+          git push origin HEAD:main
+
+          echo "should_release=true" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "release_sha=${RELEASE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "upstream_release_url=${UPSTREAM_RELEASE_URL}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build desktop app
+    needs: sync
+    if: needs.sync.outputs.should_release == 'true'
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      channel: stable
+      electron_builder_config: electron-builder.ts
+      artifact_prefix: desktop
+      artifact_retention_days: 30
+      checkout_ref: ${{ needs.sync.outputs.release_sha }}
+      build_linux: false
+      build_windows: true
+    secrets: inherit
+
+  publish:
+    name: Publish fork release
+    needs:
+      - sync
+      - build
+    if: needs.sync.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout merged release commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.sync.outputs.release_sha }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release-artifacts
+          pattern: desktop-windows-*
+          merge-multiple: true
+
+      - name: Create stable-named Windows copy
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+
+          for file in *.exe; do
+            if [[ -f "${file}" ]]; then
+              arch=$(echo "${file}" | sed -E 's/.*-([^-]+)\.exe$/\1/')
+              cp "${file}" "Superset-${arch}.exe"
+              echo "Created stable copy: Superset-${arch}.exe"
+            fi
+          done
+
+          echo "Release artifacts:"
+          ls -la
+
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.sync.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.sync.outputs.release_sha }}
+          UPSTREAM_RELEASE_URL: ${{ needs.sync.outputs.upstream_release_url }}
+        run: |
+          set -euo pipefail
+
+          git tag "${RELEASE_TAG}" "${RELEASE_SHA}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+
+          cat > release_notes.md <<EOF
+          Fork build of upstream ${RELEASE_TAG}.
+
+          Upstream release: ${UPSTREAM_RELEASE_URL}
+          EOF
+
+          gh release create "${RELEASE_TAG}" \
+            release-artifacts/* \
+            --title "Superset Desktop ${RELEASE_TAG} for Windows" \
+            --notes-file release_notes.md \
+            --target "${RELEASE_SHA}" \
+            --latest

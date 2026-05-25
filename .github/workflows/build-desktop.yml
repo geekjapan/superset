@@ -27,16 +27,34 @@ on:
         required: false
         type: number
         default: 30
+      checkout_ref:
+        description: "Git ref or SHA to check out. Defaults to the triggering ref."
+        required: false
+        type: string
+        default: ""
+      build_linux:
+        description: "Whether to build Linux artifacts."
+        required: false
+        type: boolean
+        default: true
+      build_windows:
+        description: "Whether to build Windows artifacts."
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   build-linux:
     name: Build - Linux (x64)
+    if: inputs.build_linux
     runs-on: ubuntu-latest
     environment: production
 
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup Bun
         id: setup-bun
@@ -146,6 +164,7 @@ jobs:
 
   build-windows:
     name: Build - Windows (x64)
+    if: inputs.build_windows
     runs-on: windows-latest
     environment: production
 
@@ -155,6 +174,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup Bun
         id: setup-bun
