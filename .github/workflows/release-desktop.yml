@@ -1,9 +1,6 @@
 name: Release Desktop App
 
 on:
-  push:
-    tags:
-      - "desktop-v*.*.*"
   workflow_dispatch:
     inputs:
       version:
@@ -123,3 +120,4 @@ jobs:
             --title "Superset Desktop ${{ github.ref_name }}" \
             --notes-file release_notes.md \
             --draft
+
