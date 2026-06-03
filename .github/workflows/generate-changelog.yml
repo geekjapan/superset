@@ -1,10 +1,7 @@
 name: Generate Changelog
 
 on:
-  schedule:
-    # Run every Monday at 9:00 AM UTC
-    - cron: "0 9 * * 1"
-  workflow_dispatch: # Allow manual triggering
+  workflow_dispatch:
 
 jobs:
   generate-changelog:
